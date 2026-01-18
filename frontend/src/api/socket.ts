@@ -7,20 +7,29 @@ class SocketManager {
     private handlers: Set<MessageHandler> = new Set();
     private reconnectTimeout: number | null = null;
     private currentRoomId: string | null = null;
+    private isConnecting: boolean = false;
 
     connect(roomId: string, onMessage: MessageHandler) {
         this.currentRoomId = roomId;
         this.handlers.add(onMessage);
 
+        // If already connected, just join the room
         if (this.socket?.readyState === WebSocket.OPEN) {
         this.joinRoom(roomId);
         return;
         }
 
+        // If already connecting, don't create another connection
+        if (this.isConnecting) {
+        return;
+        }
+
+        this.isConnecting = true;
         this.socket = new WebSocket('ws://localhost:3001');
 
         this.socket.onopen = () => {
         console.log('WebSocket connected');
+        this.isConnecting = false;
         this.joinRoom(roomId);
         };
 
@@ -35,10 +44,12 @@ class SocketManager {
 
         this.socket.onerror = (error) => {
         console.error('WebSocket error:', error);
+        this.isConnecting = false;
         };
 
         this.socket.onclose = () => {
         console.log('WebSocket disconnected');
+        this.isConnecting = false;
         this.attemptReconnect();
         };
     }
@@ -60,6 +71,7 @@ class SocketManager {
         this.handlers.delete(handler);
         }
         
+        // Only close socket if no handlers remain
         if (this.handlers.size === 0) {
         this.socket?.close();
         this.socket = null;
@@ -71,8 +83,8 @@ class SocketManager {
         }
     }
 
-    private joinRoom(roomId: string) {
-        this.send({ type: 'JOIN_ROOM', roomId });
+    private joinRoom(roomId: string, playerName?: string) {
+        this.send({ type: 'JOIN_ROOM', roomId, ...(playerName && { playerName }) });
     }
 
     send(message: ClientMessage) {
@@ -83,8 +95,8 @@ class SocketManager {
         }
     }
 
-    becomePlayer() {
-        this.send({ type: 'BECOME_PLAYER' });
+    becomePlayer(playerName?: string) {
+        this.send({ type: 'BECOME_PLAYER', ...(playerName && { playerName }) });
     }
 
     setSettings(settings: { maxPlayers?: number; teamsEnabled?: boolean; private?: boolean }) {

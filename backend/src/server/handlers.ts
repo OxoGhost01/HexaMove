@@ -1,8 +1,11 @@
 import WebSocket from "ws";
 import { Room } from "./room";
-import { ClientMessage, ServerMessage } from "./protocol";
+import { ClientMessage, ServerMessage, RoomInfo, PlayerInfo } from "./protocol";
 import { gameReducer } from "../engine/reducer";
 import { createInitialGameState } from "./initState";
+
+// Store player names globally (shared with server.ts)
+export const playerNames = new Map<string, string>();
 
 function requireAdmin(room: Room, clientId: string) {
     if (room.adminClientId !== clientId) {
@@ -10,8 +13,30 @@ function requireAdmin(room: Room, clientId: string) {
     }
 }
 
-function broadcast(room: Room, message: ServerMessage) {
+function getRoomInfo(room: Room): RoomInfo {
+    return {
+        roomId: room.id,
+        adminClientId: room.adminClientId,
+        players: Array.from(room.players.entries()).map(([playerId, clientId]) => ({
+        playerId,
+        clientId,
+        name: playerNames.get(clientId)
+        })),
+        spectators: Array.from(room.spectators),
+        settings: room.settings,
+        private: room.private,
+        gameStarted: room.game !== null
+    };
+}
+
+function broadcast(room: Room) {
+    const message: ServerMessage = {
+        type: "ROOM_STATE",
+        state: room.game,
+        room: getRoomInfo(room)
+    };
     const payload = JSON.stringify(message);
+    
     for (const socket of room.sockets.values()) {
         if (socket.readyState === WebSocket.OPEN) {
         socket.send(payload);
@@ -46,14 +71,14 @@ export function handleClientMessage(
             } as const;
 
             room.game = gameReducer(room.game, action);
-            broadcast(room, { type: "ROOM_STATE", state: room.game });
+            broadcast(room);
             break;
         }
 
         case "END_TURN": {
             if (!room.game) throw new Error("Game not started");
             room.game = gameReducer(room.game, { type: "END_TURN" });
-            broadcast(room, { type: "ROOM_STATE", state: room.game });
+            broadcast(room);
             break;
         }
 
@@ -61,6 +86,11 @@ export function handleClientMessage(
             if (room.game) throw new Error("Game already started");
             if (room.players.size >= room.settings.maxPlayers) {
             throw new Error("Player limit reached");
+            }
+
+            // Store player name if provided
+            if (msg.playerName) {
+            playerNames.set(clientId, msg.playerName);
             }
 
             const playerId = room.players.size;
@@ -73,7 +103,7 @@ export function handleClientMessage(
             playerId,
             } satisfies ServerMessage));
 
-            broadcast(room, { type: "ROOM_STATE", state: room.game });
+            broadcast(room);
             break;
         }
 
@@ -96,7 +126,7 @@ export function handleClientMessage(
             room.private = msg.private;
             }
 
-            broadcast(room, { type: "ROOM_STATE", state: room.game });
+            broadcast(room);
             break;
         }
 
@@ -120,9 +150,10 @@ export function handleClientMessage(
             }
             }
 
+            // Set phase to PLAYING
             room.game.phase = "PLAYING";
 
-            broadcast(room, { type: "ROOM_STATE", state: room.game });
+            broadcast(room);
             break;
         }
         }

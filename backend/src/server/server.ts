@@ -1,15 +1,38 @@
+import { WebSocketServer } from "ws";
 import crypto from "crypto";
 import { createRoom } from "./room";
 import { handleClientMessage } from "./handlers";
-import { ClientMessage, ServerMessage } from "./protocol";
-import { WebSocketServer } from "ws";
+import { ClientMessage, ServerMessage, RoomInfo, PlayerInfo } from "./protocol";
+import { createApiServer } from "../api";
 
 const wss = new WebSocketServer({ port: 3001 });
 const rooms = new Map<string, ReturnType<typeof createRoom>>();
 
+// Store player names
+const playerNames = new Map<string, string>(); // clientId -> name
+
 console.log("WebSocket server running on port 3001");
 
-wss.on("connection", (socket: import("ws")) => {
+// Start API server for room listing
+createApiServer(rooms, 3002);
+
+function getRoomInfo(room: ReturnType<typeof createRoom>): RoomInfo {
+    return {
+        roomId: room.id,
+        adminClientId: room.adminClientId,
+        players: Array.from(room.players.entries()).map(([playerId, clientId]) => ({
+        playerId,
+        clientId,
+        name: playerNames.get(clientId)
+        })),
+        spectators: Array.from(room.spectators),
+        settings: room.settings,
+        private: room.private,
+        gameStarted: room.game !== null
+    };
+    }
+
+    wss.on("connection", socket => {
     const clientId = crypto.randomUUID();
     let roomId: string | null = null;
 
@@ -22,6 +45,11 @@ wss.on("connection", (socket: import("ws")) => {
 
         if (msg.type === "JOIN_ROOM") {
             roomId = msg.roomId;
+
+            // Store player name if provided
+            if (msg.playerName) {
+            playerNames.set(clientId, msg.playerName);
+            }
 
             // Create room if it doesn't exist
             if (!rooms.has(roomId)) {
@@ -41,6 +69,7 @@ wss.on("connection", (socket: import("ws")) => {
             let role: "PLAYER" | "SPECTATOR" = "SPECTATOR";
             let playerId: number | undefined;
 
+            // Check if this client is already a player
             for (const [pid, cid] of room.players.entries()) {
             if (cid === clientId) {
                 role = "PLAYER";
@@ -49,6 +78,7 @@ wss.on("connection", (socket: import("ws")) => {
             }
             }
 
+            // If first person in room, make them a player automatically
             if (room.sockets.size === 1 && room.players.size === 0) {
             room.players.set(0, clientId);
             room.spectators.delete(clientId);
@@ -56,20 +86,24 @@ wss.on("connection", (socket: import("ws")) => {
             playerId = 0;
             }
 
+            // Send initial state
             socket.send(JSON.stringify({
             type: "ROOM_STATE",
             state: room.game,
+            room: getRoomInfo(room)
             } satisfies ServerMessage));
 
+            // Send role assignment
             socket.send(JSON.stringify({
             type: "ROLE_ASSIGNED",
             role,
-            playerId: playerId as number,
+            playerId,
             } satisfies ServerMessage));
 
             return;
         }
 
+        // Handle other messages
         if (roomId) {
             const room = rooms.get(roomId);
             if (room) {
@@ -96,6 +130,7 @@ wss.on("connection", (socket: import("ws")) => {
         room.sockets.delete(clientId);
         room.spectators.delete(clientId);
 
+        // Remove from players
         for (const [pid, cid] of room.players) {
         if (cid === clientId) {
             room.players.delete(pid);
@@ -103,17 +138,19 @@ wss.on("connection", (socket: import("ws")) => {
         }
         }
 
+        // Clean up empty rooms
         if (room.sockets.size === 0) {
         rooms.delete(roomId);
         console.log(`Room ${roomId} deleted (empty)`);
         }
     });
 
-    socket.on("error", (error: any) => {
+    socket.on("error", (error) => {
         console.error(`WebSocket error for client ${clientId}:`, error);
     });
     });
 
+    // Graceful shutdown
     process.on("SIGINT", () => {
     console.log("Shutting down server...");
     wss.close(() => {

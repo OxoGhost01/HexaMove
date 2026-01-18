@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { socketManager } from '../api/socket';
-import type { ServerMessage, GameState } from '../types/protocol';
+import type { ServerMessage, GameState, RoomInfo, PlayerInfo } from '../types/protocol';
 
 interface RoomState {
     gameState: GameState | null;
+    roomInfo: RoomInfo | null;
     myRole: 'SPECTATOR' | 'PLAYER' | null;
     myPlayerId?: number;
     error: string | null;
@@ -13,20 +14,23 @@ interface RoomState {
 export const RoomView: React.FC = () => {
     const { roomId } = useParams<{ roomId: string }>();
     const navigate = useNavigate();
+    const location = useLocation();
     const [room, setRoom] = useState<RoomState>({
         gameState: null,
+        roomInfo: null,
         myRole: null,
         error: null
     });
     const [isConnected, setIsConnected] = useState(false);
-    const [copiedRoomId, setCopiedRoomId] = useState(false);
+    const [copiedCode, setCopiedCode] = useState(false);
+    const [playerName, setPlayerName] = useState('');
 
     const handleMessage = useCallback((message: ServerMessage) => {
         console.log('Received message:', message);
 
         switch (message.type) {
         case 'ROOM_STATE':
-            setRoom(prev => ({ ...prev, gameState: message.state, error: null }));
+            setRoom(prev => ({ ...prev, gameState: message.state, roomInfo: message.room, error: null }));
             setIsConnected(true);
             break;
 
@@ -52,15 +56,19 @@ export const RoomView: React.FC = () => {
         return;
         }
 
+        const state = location.state as any;
+        const name = state?.playerName || localStorage.getItem('playerName') || '';
+        setPlayerName(name);
+
         socketManager.connect(roomId, handleMessage);
 
         return () => {
         socketManager.disconnect(handleMessage);
         };
-    }, [roomId, navigate, handleMessage]);
+    }, [roomId, navigate, handleMessage, location.state]);
 
     const handleBecomePlayer = () => {
-        socketManager.becomePlayer();
+        socketManager.becomePlayer(playerName);
     };
 
     const handleStartGame = () => {
@@ -71,40 +79,41 @@ export const RoomView: React.FC = () => {
         socketManager.setSettings({ [key]: value });
     };
 
-    const copyRoomId = () => {
+    const copyRoomCode = () => {
         if (roomId) {
         navigator.clipboard.writeText(roomId);
-        setCopiedRoomId(true);
-        setTimeout(() => setCopiedRoomId(false), 2000);
+        setCopiedCode(true);
+        setTimeout(() => setCopiedCode(false), 2000);
         }
     };
 
-    const { gameState, myRole, myPlayerId, error } = room;
+    const { gameState, roomInfo, myRole, myPlayerId, error } = room;
     const isInLobby = !gameState || gameState.phase === 'LOBBY';
-    const isAdmin = myRole === 'PLAYER' && myPlayerId === 0;
-    const playerCount = gameState?.players?.length || 0;
-    const maxPlayers = 4;
+    const isAdmin = roomInfo?.adminClientId && myPlayerId !== undefined && 
+                    roomInfo.players.find(p => p.playerId === myPlayerId)?.clientId === roomInfo.adminClientId;
+    const playerCount = roomInfo?.players.length || 0;
+    const maxPlayers = roomInfo?.settings.maxPlayers || 4;
 
     if (!isConnected) {
         return (
         <div style={{
             minHeight: '100vh',
+            background: '#0f172a',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            background: '#f5f5f5'
+            justifyContent: 'center'
         }}>
             <div style={{ textAlign: 'center' }}>
             <div style={{
                 width: '50px',
                 height: '50px',
-                border: '4px solid #ddd',
-                borderTopColor: '#667eea',
+                border: '4px solid #334155',
+                borderTopColor: '#3b82f6',
                 borderRadius: '50%',
                 animation: 'spin 1s linear infinite',
                 margin: '0 auto 16px'
             }} />
-            <p style={{ color: '#666', fontSize: '18px' }}>Connecting to room...</p>
+            <p style={{ color: '#94a3b8', fontSize: '16px' }}>Connecting...</p>
             </div>
         </div>
         );
@@ -113,8 +122,7 @@ export const RoomView: React.FC = () => {
     return (
         <div style={{
         minHeight: '100vh',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        padding: '24px',
+        background: '#0f172a',
         fontFamily: 'system-ui, -apple-system, sans-serif'
         }}>
         {/* Error Toast */}
@@ -127,58 +135,74 @@ export const RoomView: React.FC = () => {
             color: 'white',
             padding: '16px 24px',
             borderRadius: '12px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            boxShadow: '0 8px 24px rgba(239, 68, 68, 0.4)',
             zIndex: 1000,
-            animation: 'slideIn 0.3s ease-out'
+            animation: 'slideIn 0.3s ease-out',
+            fontWeight: '500'
             }}>
             ⚠️ {error}
             </div>
         )}
 
+        {/* Header */}
         <div style={{
-            maxWidth: '1200px',
-            margin: '0 auto'
+            background: '#1e293b',
+            borderBottom: '1px solid #334155',
+            padding: '16px 24px'
         }}>
-            {/* Header */}
             <div style={{
-            background: 'white',
-            borderRadius: '16px',
-            padding: '24px',
-            marginBottom: '24px',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
+            maxWidth: '1200px',
+            margin: '0 auto',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center'
             }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                <h1 style={{
-                    margin: 0,
-                    fontSize: '28px',
-                    fontWeight: 'bold',
-                    color: '#333'
-                }}>
-                    {isInLobby ? 'Game Lobby' : 'Game in Progress'}
-                </h1>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                    marginTop: '8px'
-                }}>
-                    <span style={{ color: '#666', fontSize: '14px' }}>Room ID:</span>
-                    <code style={{
-                    background: '#f5f5f5',
-                    padding: '6px 12px',
-                    borderRadius: '6px',
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <button
+                onClick={() => navigate('/')}
+                style={{
+                    padding: '8px 16px',
                     fontSize: '14px',
-                    fontFamily: 'monospace'
+                    fontWeight: '600',
+                    color: '#94a3b8',
+                    background: 'transparent',
+                    border: '2px solid #334155',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = '#475569';
+                    e.currentTarget.style.color = 'white';
+                }}
+                onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = '#334155';
+                    e.currentTarget.style.color = '#94a3b8';
+                }}
+                >
+                ← Leave
+                </button>
+                <div>
+                <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '2px' }}>
+                    Room Code
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <code style={{
+                    fontSize: '24px',
+                    fontWeight: 'bold',
+                    color: 'white',
+                    fontFamily: 'monospace',
+                    letterSpacing: '0.2em'
                     }}>
                     {roomId}
                     </code>
                     <button
-                    onClick={copyRoomId}
+                    onClick={copyRoomCode}
                     style={{
                         padding: '6px 12px',
-                        fontSize: '14px',
-                        background: copiedRoomId ? '#10b981' : '#667eea',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        background: copiedCode ? '#10b981' : '#334155',
                         color: 'white',
                         border: 'none',
                         borderRadius: '6px',
@@ -186,103 +210,122 @@ export const RoomView: React.FC = () => {
                         transition: 'all 0.2s'
                     }}
                     >
-                    {copiedRoomId ? '✓ Copied!' : '📋 Copy'}
+                    {copiedCode ? '✓' : '📋'}
                     </button>
                 </div>
                 </div>
-                <button
-                onClick={() => navigate('/')}
-                style={{
-                    padding: '12px 24px',
-                    fontSize: '16px',
-                    background: 'white',
-                    color: '#667eea',
-                    border: '2px solid #667eea',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontWeight: '600',
-                    transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#f8f9ff';
-                }}
-                onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'white';
-                }}
-                >
-                ← Leave Room
-                </button>
             </div>
             </div>
+        </div>
 
-            {isInLobby ? (
+        {isInLobby ? (
             /* LOBBY VIEW */
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }}>
+            <div style={{
+            maxWidth: '1000px',
+            margin: '0 auto',
+            padding: '32px 24px'
+            }}>
+            <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 380px',
+                gap: '24px'
+            }}>
                 {/* Players Section */}
                 <div style={{
-                background: 'white',
+                background: '#1e293b',
                 borderRadius: '16px',
                 padding: '24px',
-                boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
+                border: '1px solid #334155'
                 }}>
                 <h2 style={{
                     margin: '0 0 20px 0',
-                    fontSize: '22px',
-                    fontWeight: 'bold',
-                    color: '#333'
+                    fontSize: '20px',
+                    fontWeight: '600',
+                    color: 'white'
                 }}>
-                    Players ({playerCount}/{maxPlayers})
+                    Players <span style={{ color: '#64748b' }}>({playerCount}/{maxPlayers})</span>
                 </h2>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {gameState?.players?.map((player, idx) => (
-                    <div key={player.id} style={{
+                    {roomInfo?.players.map((player: PlayerInfo) => {
+                    const isMe = player.playerId === myPlayerId;
+                    const isRoomAdmin = player.clientId === roomInfo.adminClientId;
+                    
+                    return (
+                        <div key={player.playerId} style={{
                         padding: '16px',
-                        background: idx === 0 ? '#fef3c7' : '#f5f5f5',
+                        background: isMe ? '#334155' : '#0f172a',
                         borderRadius: '12px',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '12px',
-                        border: player.id === myPlayerId ? '2px solid #667eea' : 'none'
-                    }}>
-                        <div style={{
-                        width: '40px',
-                        height: '40px',
-                        borderRadius: '50%',
-                        background: `hsl(${player.id * 60}, 70%, 60%)`,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '18px',
-                        fontWeight: 'bold',
-                        color: 'white'
+                        border: isMe ? '2px solid #3b82f6' : '2px solid transparent',
+                        transition: 'all 0.2s'
                         }}>
-                        {player.id + 1}
+                        <div style={{
+                            width: '48px',
+                            height: '48px',
+                            borderRadius: '50%',
+                            background: `linear-gradient(135deg, ${getPlayerColor(player.playerId)})`,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '20px',
+                            fontWeight: 'bold',
+                            color: 'white',
+                            flexShrink: 0
+                        }}>
+                            {(player.name || `P${player.playerId + 1}`).charAt(0).toUpperCase()}
                         </div>
-                        <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: '600', color: '#333' }}>
-                            Player {player.id + 1}
-                            {player.id === myPlayerId && ' (You)'}
-                            {idx === 0 && ' 👑'}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{
+                            fontWeight: '600',
+                            color: 'white',
+                            fontSize: '16px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px'
+                            }}>
+                            <span style={{ 
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                            }}>
+                                {player.name || `Player ${player.playerId + 1}`}
+                            </span>
+                            {isRoomAdmin && <span>👑</span>}
+                            {isMe && (
+                                <span style={{
+                                fontSize: '12px',
+                                padding: '2px 8px',
+                                background: '#3b82f6',
+                                borderRadius: '4px',
+                                fontWeight: '500'
+                                }}>
+                                YOU
+                                </span>
+                            )}
+                            </div>
+                            <div style={{ fontSize: '13px', color: '#64748b' }}>
+                            {isRoomAdmin ? 'Host' : 'Player'}
+                            </div>
                         </div>
-                        <div style={{ fontSize: '12px', color: '#666' }}>
-                            {idx === 0 ? 'Admin' : 'Player'}
                         </div>
-                        </div>
-                    </div>
-                    ))}
+                    );
+                    })}
 
                     {playerCount < maxPlayers && Array.from({ length: maxPlayers - playerCount }).map((_, idx) => (
                     <div key={`empty-${idx}`} style={{
                         padding: '16px',
-                        background: '#fafafa',
+                        background: '#0f172a',
                         borderRadius: '12px',
-                        border: '2px dashed #ddd',
+                        border: '2px dashed #334155',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        color: '#999',
-                        fontSize: '14px'
+                        color: '#475569',
+                        fontSize: '14px',
+                        fontWeight: '500'
                     }}>
                         Waiting for player...
                     </div>
@@ -296,50 +339,57 @@ export const RoomView: React.FC = () => {
                         width: '100%',
                         marginTop: '20px',
                         padding: '16px',
-                        fontSize: '18px',
+                        fontSize: '16px',
                         fontWeight: '600',
                         color: 'white',
                         background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                         border: 'none',
                         borderRadius: '12px',
                         cursor: 'pointer',
-                        transition: 'transform 0.2s'
+                        transition: 'all 0.2s'
                     }}
                     onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.transform = 'translateY(-1px)';
+                        e.currentTarget.style.boxShadow = '0 8px 20px rgba(16, 185, 129, 0.4)';
                     }}
                     onMouseLeave={(e) => {
                         e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = 'none';
                     }}
                     >
-                    Join as Player
+                    Join Game
                     </button>
                 )}
                 </div>
 
                 {/* Settings & Controls */}
-                <div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {/* Settings */}
                 <div style={{
-                    background: 'white',
+                    background: '#1e293b',
                     borderRadius: '16px',
                     padding: '24px',
-                    marginBottom: '24px',
-                    boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
+                    border: '1px solid #334155'
                 }}>
                     <h3 style={{
                     margin: '0 0 16px 0',
                     fontSize: '18px',
-                    fontWeight: 'bold',
-                    color: '#333'
+                    fontWeight: '600',
+                    color: 'white'
                     }}>
-                    Game Settings
+                    Settings
                     </h3>
 
                     {isAdmin ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         <div>
-                        <label style={{ display: 'block', marginBottom: '8px', color: '#666', fontSize: '14px' }}>
+                        <label style={{
+                            display: 'block',
+                            marginBottom: '8px',
+                            color: '#94a3b8',
+                            fontSize: '14px',
+                            fontWeight: '500'
+                        }}>
                             Max Players
                         </label>
                         <select
@@ -348,10 +398,13 @@ export const RoomView: React.FC = () => {
                             style={{
                             width: '100%',
                             padding: '12px',
-                            border: '2px solid #e0e0e0',
+                            background: '#0f172a',
+                            border: '2px solid #334155',
                             borderRadius: '8px',
-                            fontSize: '16px',
-                            cursor: 'pointer'
+                            fontSize: '15px',
+                            color: 'white',
+                            cursor: 'pointer',
+                            outline: 'none'
                             }}
                         >
                             {[2, 3, 4, 5, 6, 7, 8].map(n => (
@@ -366,16 +419,19 @@ export const RoomView: React.FC = () => {
                         gap: '12px',
                         cursor: 'pointer',
                         padding: '12px',
-                        background: '#f5f5f5',
-                        borderRadius: '8px'
+                        background: '#0f172a',
+                        borderRadius: '8px',
+                        border: '2px solid #334155'
                         }}>
                         <input
                             type="checkbox"
                             defaultChecked={true}
                             onChange={(e) => handleSettingChange('teamsEnabled', e.target.checked)}
-                            style={{ width: '20px', height: '20px', cursor: 'pointer' }}
+                            style={{ width: '18px', height: '18px', cursor: 'pointer' }}
                         />
-                        <span style={{ fontSize: '14px', color: '#333' }}>Enable Teams</span>
+                        <span style={{ fontSize: '14px', color: 'white', fontWeight: '500' }}>
+                            Enable Teams
+                        </span>
                         </label>
 
                         <label style={{
@@ -384,28 +440,32 @@ export const RoomView: React.FC = () => {
                         gap: '12px',
                         cursor: 'pointer',
                         padding: '12px',
-                        background: '#f5f5f5',
-                        borderRadius: '8px'
+                        background: '#0f172a',
+                        borderRadius: '8px',
+                        border: '2px solid #334155'
                         }}>
                         <input
                             type="checkbox"
                             defaultChecked={true}
                             onChange={(e) => handleSettingChange('private', e.target.checked)}
-                            style={{ width: '20px', height: '20px', cursor: 'pointer' }}
+                            style={{ width: '18px', height: '18px', cursor: 'pointer' }}
                         />
-                        <span style={{ fontSize: '14px', color: '#333' }}>Private Room</span>
+                        <span style={{ fontSize: '14px', color: 'white', fontWeight: '500' }}>
+                            Private Room
+                        </span>
                         </label>
                     </div>
                     ) : (
                     <div style={{
                         padding: '16px',
-                        background: '#f8f9ff',
+                        background: '#0f172a',
                         borderRadius: '8px',
                         fontSize: '14px',
-                        color: '#666',
-                        textAlign: 'center'
+                        color: '#64748b',
+                        textAlign: 'center',
+                        border: '2px solid #334155'
                     }}>
-                        Only the admin can change settings
+                        Only the host can change settings
                     </div>
                     )}
                 </div>
@@ -418,27 +478,26 @@ export const RoomView: React.FC = () => {
                     style={{
                         width: '100%',
                         padding: '20px',
-                        fontSize: '20px',
+                        fontSize: '18px',
                         fontWeight: 'bold',
                         color: 'white',
                         background: playerCount >= 2
-                        ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                        : '#ccc',
+                        ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'
+                        : '#334155',
                         border: 'none',
-                        borderRadius: '16px',
+                        borderRadius: '12px',
                         cursor: playerCount >= 2 ? 'pointer' : 'not-allowed',
-                        boxShadow: playerCount >= 2 ? '0 8px 24px rgba(102, 126, 234, 0.4)' : 'none',
                         transition: 'all 0.2s'
                     }}
                     onMouseEnter={(e) => {
                         if (playerCount >= 2) {
-                        e.currentTarget.style.transform = 'translateY(-2px)';
-                        e.currentTarget.style.boxShadow = '0 12px 32px rgba(102, 126, 234, 0.5)';
+                        e.currentTarget.style.transform = 'translateY(-1px)';
+                        e.currentTarget.style.boxShadow = '0 8px 20px rgba(59, 130, 246, 0.5)';
                         }
                     }}
                     onMouseLeave={(e) => {
                         e.currentTarget.style.transform = 'translateY(0)';
-                        e.currentTarget.style.boxShadow = playerCount >= 2 ? '0 8px 24px rgba(102, 126, 234, 0.4)' : 'none';
+                        e.currentTarget.style.boxShadow = 'none';
                     }}
                     >
                     {playerCount < 2 ? 'Need 2+ Players' : '🚀 Start Game'}
@@ -448,45 +507,56 @@ export const RoomView: React.FC = () => {
                 {!isAdmin && myRole === 'PLAYER' && (
                     <div style={{
                     padding: '20px',
-                    background: 'white',
-                    borderRadius: '16px',
+                    background: '#1e293b',
+                    border: '1px solid #334155',
+                    borderRadius: '12px',
                     textAlign: 'center',
-                    color: '#666',
-                    fontSize: '16px',
-                    boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
+                    color: '#94a3b8',
+                    fontSize: '15px'
                     }}>
-                    Waiting for admin to start...
+                    Waiting for host to start...
                     </div>
                 )}
                 </div>
             </div>
-            ) : (
+            </div>
+        ) : (
             /* GAME VIEW */
             <div style={{
-                background: 'white',
+            maxWidth: '1200px',
+            margin: '0 auto',
+            padding: '32px 24px'
+            }}>
+            <div style={{
+                background: '#1e293b',
                 borderRadius: '16px',
                 padding: '48px',
-                boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+                border: '1px solid #334155',
                 textAlign: 'center'
             }}>
-                <h2 style={{ fontSize: '32px', marginBottom: '16px' }}>🎮 Game Started!</h2>
-                <p style={{ color: '#666', fontSize: '18px', marginBottom: '24px' }}>
+                <h2 style={{ fontSize: '32px', color: 'white', marginBottom: '16px' }}>
+                🎮 Game Started!
+                </h2>
+                <p style={{ color: '#94a3b8', fontSize: '18px', marginBottom: '24px' }}>
                 Phase: {gameState.phase}
                 </p>
-                <p style={{ color: '#999' }}>
-                The game interface will be implemented here...
-                </p>
-                <div style={{ marginTop: '32px', padding: '24px', background: '#f5f5f5', borderRadius: '12px' }}>
-                <h3 style={{ marginBottom: '16px' }}>Current Game State</h3>
-                <div style={{ textAlign: 'left', fontSize: '14px' }}>
+                <div style={{
+                marginTop: '32px',
+                padding: '24px',
+                background: '#0f172a',
+                borderRadius: '12px',
+                border: '2px solid #334155'
+                }}>
+                <h3 style={{ color: 'white', marginBottom: '16px' }}>Current Game State</h3>
+                <div style={{ textAlign: 'left', fontSize: '14px', color: '#94a3b8' }}>
                     <p>Turn: Player {gameState.turnIndex + 1}</p>
                     <p>Draw Pile: {gameState.drawPile.length} cards</p>
                     <p>Players: {gameState.players.length}</p>
                 </div>
                 </div>
             </div>
-            )}
-        </div>
+            </div>
+        )}
 
         <style>{`
             @keyframes spin {
@@ -506,3 +576,17 @@ export const RoomView: React.FC = () => {
         </div>
     );
 };
+
+function getPlayerColor(playerId: number): string {
+    const colors = [
+        '#3b82f6, #2563eb', 
+        '#10b981, #059669', 
+        '#f59e0b, #d97706', 
+        '#ef4444, #dc2626', 
+        '#8b5cf6, #7c3aed', 
+        '#ec4899, #db2777', 
+        '#06b6d4, #0891b2', 
+        '#f97316, #ea580c', 
+    ];
+    return colors[playerId % colors.length];
+}
