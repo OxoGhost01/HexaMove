@@ -20,7 +20,7 @@ export interface Pawn {
     ownerId: number;
     location: PawnLocation;
     isPieu: boolean;
-}
+    }
 
 export interface Player {
     id: number;
@@ -53,14 +53,31 @@ export type PawnLocation =
     | { type: "HOME"; index: number }
     | { type: "FINISHED" };
 
-export interface LegalMove {
-    pawnId: number;
-    cardId: string;
-    asCardType?: CardType; // only for Joker: which type the player chooses
-}
+export type ClientMessage =
+    | { type: "JOIN_ROOM"; roomId: string }
+    | { type: "BECOME_PLAYER" }
+    | { type: "SET_SETTINGS"; maxPlayers?: number; teamsEnabled?: boolean; private?: boolean }
+    | { type: "START_GAME" }
+    | {
+        type: "PLAY_CARD";
+        cardId: string;
+        pawnIds?: number[];
+        asCardType?: CardType;
+        }
+    | { type: "END_TURN" };
 
-export type GameAction =
-    | { type: "PLAY_CARD"; playerId: number; cardId: string; pawnIds?: number[]; asCardType?: CardType }
-    | { type: "DISCARD_CARD"; playerId: number; cardIds: string[] }
-    | { type: "END_TURN" }
-    | { type: "START_GAME"; playerCount: number };
+export type ServerMessage =
+    | { type: "ROOM_STATE"; state: GameState | null }
+    | { type: "ROLE_ASSIGNED"; role: "PLAYER" | "SPECTATOR"; playerId?: number }
+    | { type: "ERROR"; message: string };
+
+export interface LobbyState {
+    roomId: string;
+    adminClientId: string;
+    connectedClients: { id: string; name?: string }[];
+    settings: {
+        maxPlayers: number;
+        teamsEnabled: boolean;
+    };
+    players: { seat: number; clientId: string }[];
+}

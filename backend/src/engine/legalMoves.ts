@@ -18,17 +18,14 @@ export function pawnCanMoveWithCard(
         case "BACK_4":
         if (pawn.location.type === "TRACK") {
             const target = (pawn.location.index - 4 + state.board.trackLength) % state.board.trackLength;
-            return true; // can always move back, capture handled separately
+            return true;
         }
         return false;
 
         case "SPLIT_7":
-        // special: player can split move among multiple pawns
-        // handled at higher level, assume pawn is candidate
         return pawn.location.type === "TRACK";
 
         default:
-        // numbered move forward
         if (pawn.location.type === "TRACK") {
             const loc = resolveForwardMove(pawn, parseInt(type.match(/\d+/)![0]), state);
             return loc !== null;
@@ -91,5 +88,5 @@ export function forcedDiscard(
         return [player!.hand[0]!];
     }
 
-    return null; // no discard required
+    return null;
 }

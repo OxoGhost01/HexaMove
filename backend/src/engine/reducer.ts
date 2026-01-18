@@ -16,6 +16,7 @@ export type GameAction =
         playerId: number;
         cardIds: string[];
         }
+    | { type: "START_GAME" }
     | { type: "END_TURN" };
 
 
@@ -61,7 +62,6 @@ export function gameReducer(
             }
 
             case "SPLIT_7": {
-            // assumed: client already validated split
             const stepsPerPawn = Math.floor(7 / action.pawnIds!.length);
             for (const pid of action.pawnIds!) {
                 const pawn = findPawn(state, pid);
@@ -98,6 +98,16 @@ export function gameReducer(
             }
         }
         return state;
+        }
+
+        case "START_GAME": {
+            if (state.phase !== "SETUP") return state;
+
+            return {
+                ...state,
+                phase: "PLAYING",
+                turnIndex: state.firstPlayerIndex,
+            };
         }
 
         case "END_TURN": {
