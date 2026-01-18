@@ -1,14 +1,22 @@
+// src/components/RoomView.tsx
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { socketManager } from '../api/socket';
 import type { ServerMessage, GameState, RoomInfo, PlayerInfo } from '../types/protocol';
+import { Chat } from './Chat';
+import type { ChatMessage } from './Chat';
+import { GameBoard } from './GameBoard';
+import { Card } from './Card';
+import { generateRandomName } from '../utils/nameGenerator';
 
 interface RoomState {
     gameState: GameState | null;
     roomInfo: RoomInfo | null;
     myRole: 'SPECTATOR' | 'PLAYER' | null;
     myPlayerId?: number;
+    myClientId?: string;
     error: string | null;
+    chatMessages: ChatMessage[];
 }
 
 export const RoomView: React.FC = () => {
@@ -19,18 +27,26 @@ export const RoomView: React.FC = () => {
         gameState: null,
         roomInfo: null,
         myRole: null,
-        error: null
+        error: null,
+        chatMessages: []
     });
     const [isConnected, setIsConnected] = useState(false);
     const [copiedCode, setCopiedCode] = useState(false);
     const [playerName, setPlayerName] = useState('');
+    const [selectedCard, setSelectedCard] = useState<string | null>(null);
+    const [selectedPawns, setSelectedPawns] = useState<number[]>([]);
 
     const handleMessage = useCallback((message: ServerMessage) => {
         console.log('Received message:', message);
 
         switch (message.type) {
         case 'ROOM_STATE':
-            setRoom(prev => ({ ...prev, gameState: message.state, roomInfo: message.room, error: null }));
+            setRoom(prev => ({ 
+            ...prev, 
+            gameState: message.state, 
+            roomInfo: message.room, 
+            error: null 
+            }));
             setIsConnected(true);
             break;
 
@@ -40,6 +56,18 @@ export const RoomView: React.FC = () => {
             myRole: message.role,
             myPlayerId: message.playerId,
             error: null
+            }));
+            break;
+
+        case 'CHAT_MESSAGE':
+            setRoom(prev => ({
+            ...prev,
+            chatMessages: [...prev.chatMessages, {
+                clientId: message.clientId,
+                playerName: message.playerName,
+                message: message.message,
+                timestamp: message.timestamp
+            }]
             }));
             break;
 
@@ -57,7 +85,14 @@ export const RoomView: React.FC = () => {
         }
 
         const state = location.state as any;
-        const name = state?.playerName || localStorage.getItem('playerName') || '';
+        let name = state?.playerName || localStorage.getItem('playerName') || '';
+        
+        // Generate random name if empty
+        if (!name.trim()) {
+        name = generateRandomName();
+        localStorage.setItem('playerName', name);
+        }
+        
         setPlayerName(name);
 
         socketManager.connect(roomId, handleMessage);
@@ -79,6 +114,36 @@ export const RoomView: React.FC = () => {
         socketManager.setSettings({ [key]: value });
     };
 
+    const handleSendChat = (message: string) => {
+        socketManager.sendChat(message);
+    };
+
+    const handleCardClick = (cardId: string) => {
+        setSelectedCard(selectedCard === cardId ? null : cardId);
+        setSelectedPawns([]);
+    };
+
+    const handlePawnClick = (pawnId: number) => {
+        if (selectedPawns.includes(pawnId)) {
+        setSelectedPawns(selectedPawns.filter(id => id !== pawnId));
+        } else {
+        setSelectedPawns([...selectedPawns, pawnId]);
+        }
+    };
+
+    const handlePlayCard = () => {
+        if (!selectedCard) return;
+        socketManager.playCard(selectedCard, selectedPawns.length > 0 ? selectedPawns : undefined);
+        setSelectedCard(null);
+        setSelectedPawns([]);
+    };
+
+    const handleEndTurn = () => {
+        socketManager.endTurn();
+        setSelectedCard(null);
+        setSelectedPawns([]);
+    };
+
     const copyRoomCode = () => {
         if (roomId) {
         navigator.clipboard.writeText(roomId);
@@ -87,12 +152,13 @@ export const RoomView: React.FC = () => {
         }
     };
 
-    const { gameState, roomInfo, myRole, myPlayerId, error } = room;
+    const { gameState, roomInfo, myRole, myPlayerId, error, chatMessages } = room;
     const isInLobby = !gameState || gameState.phase === 'LOBBY';
     const isAdmin = roomInfo?.adminClientId && myPlayerId !== undefined && 
                     roomInfo.players.find(p => p.playerId === myPlayerId)?.clientId === roomInfo.adminClientId;
     const playerCount = roomInfo?.players.length || 0;
     const maxPlayers = roomInfo?.settings.maxPlayers || 4;
+    const isMyTurn = gameState && gameState.turnIndex === myPlayerId;
 
     if (!isConnected) {
         return (
@@ -151,7 +217,7 @@ export const RoomView: React.FC = () => {
             padding: '16px 24px'
         }}>
             <div style={{
-            maxWidth: '1200px',
+            maxWidth: '1400px',
             margin: '0 auto',
             display: 'flex',
             justifyContent: 'space-between',
@@ -221,7 +287,7 @@ export const RoomView: React.FC = () => {
         {isInLobby ? (
             /* LOBBY VIEW */
             <div style={{
-            maxWidth: '1000px',
+            maxWidth: '1200px',
             margin: '0 auto',
             padding: '32px 24px'
             }}>
@@ -230,39 +296,41 @@ export const RoomView: React.FC = () => {
                 gridTemplateColumns: '1fr 380px',
                 gap: '24px'
             }}>
+                {/* Left: Players + Chat */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                 {/* Players Section */}
                 <div style={{
-                background: '#1e293b',
-                borderRadius: '16px',
-                padding: '24px',
-                border: '1px solid #334155'
+                    background: '#1e293b',
+                    borderRadius: '16px',
+                    padding: '24px',
+                    border: '1px solid #334155'
                 }}>
-                <h2 style={{
+                    <h2 style={{
                     margin: '0 0 20px 0',
                     fontSize: '20px',
                     fontWeight: '600',
                     color: 'white'
-                }}>
+                    }}>
                     Players <span style={{ color: '#64748b' }}>({playerCount}/{maxPlayers})</span>
-                </h2>
+                    </h2>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {roomInfo?.players.map((player: PlayerInfo) => {
-                    const isMe = player.playerId === myPlayerId;
-                    const isRoomAdmin = player.clientId === roomInfo.adminClientId;
-                    
-                    return (
+                        const isMe = player.playerId === myPlayerId;
+                        const isRoomAdmin = player.clientId === roomInfo.adminClientId;
+                        
+                        return (
                         <div key={player.playerId} style={{
-                        padding: '16px',
-                        background: isMe ? '#334155' : '#0f172a',
-                        borderRadius: '12px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px',
-                        border: isMe ? '2px solid #3b82f6' : '2px solid transparent',
-                        transition: 'all 0.2s'
+                            padding: '16px',
+                            background: isMe ? '#334155' : '#0f172a',
+                            borderRadius: '12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '12px',
+                            border: isMe ? '2px solid #3b82f6' : '2px solid transparent',
+                            transition: 'all 0.2s'
                         }}>
-                        <div style={{
+                            <div style={{
                             width: '48px',
                             height: '48px',
                             borderRadius: '50%',
@@ -274,48 +342,48 @@ export const RoomView: React.FC = () => {
                             fontWeight: 'bold',
                             color: 'white',
                             flexShrink: 0
-                        }}>
-                            {(player.name || `P${player.playerId + 1}`).charAt(0).toUpperCase()}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{
-                            fontWeight: '600',
-                            color: 'white',
-                            fontSize: '16px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px'
                             }}>
-                            <span style={{ 
+                            {(player.name || `P${player.playerId + 1}`).charAt(0).toUpperCase()}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{
+                                fontWeight: '600',
+                                color: 'white',
+                                fontSize: '16px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px'
+                            }}>
+                                <span style={{ 
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap'
-                            }}>
-                                {player.name || `Player ${player.playerId + 1}`}
-                            </span>
-                            {isRoomAdmin && <span>👑</span>}
-                            {isMe && (
-                                <span style={{
-                                fontSize: '12px',
-                                padding: '2px 8px',
-                                background: '#3b82f6',
-                                borderRadius: '4px',
-                                fontWeight: '500'
                                 }}>
-                                YOU
+                                {player.name || `Player ${player.playerId + 1}`}
                                 </span>
-                            )}
+                                {isRoomAdmin && <span>👑</span>}
+                                {isMe && (
+                                <span style={{
+                                    fontSize: '12px',
+                                    padding: '2px 8px',
+                                    background: '#3b82f6',
+                                    borderRadius: '4px',
+                                    fontWeight: '500'
+                                }}>
+                                    YOU
+                                </span>
+                                )}
                             </div>
                             <div style={{ fontSize: '13px', color: '#64748b' }}>
-                            {isRoomAdmin ? 'Host' : 'Player'}
+                                {isRoomAdmin ? 'Host' : 'Player'}
+                            </div>
                             </div>
                         </div>
-                        </div>
-                    );
+                        );
                     })}
 
                     {playerCount < maxPlayers && Array.from({ length: maxPlayers - playerCount }).map((_, idx) => (
-                    <div key={`empty-${idx}`} style={{
+                        <div key={`empty-${idx}`} style={{
                         padding: '16px',
                         background: '#0f172a',
                         borderRadius: '12px',
@@ -326,16 +394,16 @@ export const RoomView: React.FC = () => {
                         color: '#475569',
                         fontSize: '14px',
                         fontWeight: '500'
-                    }}>
+                        }}>
                         Waiting for player...
-                    </div>
+                        </div>
                     ))}
-                </div>
+                    </div>
 
-                {myRole === 'SPECTATOR' && playerCount < maxPlayers && (
+                    {myRole === 'SPECTATOR' && playerCount < maxPlayers && (
                     <button
-                    onClick={handleBecomePlayer}
-                    style={{
+                        onClick={handleBecomePlayer}
+                        style={{
                         width: '100%',
                         marginTop: '20px',
                         padding: '16px',
@@ -347,22 +415,32 @@ export const RoomView: React.FC = () => {
                         borderRadius: '12px',
                         cursor: 'pointer',
                         transition: 'all 0.2s'
-                    }}
-                    onMouseEnter={(e) => {
+                        }}
+                        onMouseEnter={(e) => {
                         e.currentTarget.style.transform = 'translateY(-1px)';
                         e.currentTarget.style.boxShadow = '0 8px 20px rgba(16, 185, 129, 0.4)';
-                    }}
-                    onMouseLeave={(e) => {
+                        }}
+                        onMouseLeave={(e) => {
                         e.currentTarget.style.transform = 'translateY(0)';
                         e.currentTarget.style.boxShadow = 'none';
-                    }}
+                        }}
                     >
-                    Join Game
+                        Join Game
                     </button>
-                )}
+                    )}
                 </div>
 
-                {/* Settings & Controls */}
+                {/* Chat */}
+                <div style={{ height: '400px' }}>
+                    <Chat 
+                    messages={chatMessages} 
+                    onSendMessage={handleSendChat}
+                    myClientId={roomInfo?.players.find(p => p.playerId === myPlayerId)?.clientId}
+                    />
+                </div>
+                </div>
+
+                {/* Right: Settings & Controls */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {/* Settings */}
                 <div style={{
@@ -523,36 +601,204 @@ export const RoomView: React.FC = () => {
         ) : (
             /* GAME VIEW */
             <div style={{
-            maxWidth: '1200px',
+            maxWidth: '1400px',
             margin: '0 auto',
-            padding: '32px 24px'
+            padding: '24px',
+            display: 'grid',
+            gridTemplateColumns: '1fr 320px',
+            gap: '24px',
+            minHeight: 'calc(100vh - 100px)'
             }}>
-            <div style={{
-                background: '#1e293b',
-                borderRadius: '16px',
-                padding: '48px',
-                border: '1px solid #334155',
-                textAlign: 'center'
-            }}>
-                <h2 style={{ fontSize: '32px', color: 'white', marginBottom: '16px' }}>
-                🎮 Game Started!
-                </h2>
-                <p style={{ color: '#94a3b8', fontSize: '18px', marginBottom: '24px' }}>
-                Phase: {gameState.phase}
-                </p>
+            {/* Main Game Area */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                {/* Turn Indicator */}
                 <div style={{
-                marginTop: '32px',
-                padding: '24px',
-                background: '#0f172a',
+                background: isMyTurn ? '#10b981' : '#1e293b',
+                border: '1px solid #334155',
                 borderRadius: '12px',
-                border: '2px solid #334155'
+                padding: '16px 24px',
+                textAlign: 'center'
                 }}>
-                <h3 style={{ color: 'white', marginBottom: '16px' }}>Current Game State</h3>
-                <div style={{ textAlign: 'left', fontSize: '14px', color: '#94a3b8' }}>
-                    <p>Turn: Player {gameState.turnIndex + 1}</p>
-                    <p>Draw Pile: {gameState.drawPile.length} cards</p>
-                    <p>Players: {gameState.players.length}</p>
+                <div style={{ fontSize: '18px', fontWeight: '600', color: 'white' }}>
+                    {isMyTurn ? "🎯 Your Turn!" : `Waiting for ${gameState.players[gameState.turnIndex]?.hand ? 'Player ' + (gameState.turnIndex + 1) : 'player...'}`}
                 </div>
+                </div>
+
+                {/* Game Board */}
+                <div style={{
+                background: '#1e293b',
+                border: '1px solid #334155',
+                borderRadius: '16px',
+                padding: '24px',
+                display: 'flex',
+                justifyContent: 'center'
+                }}>
+                <GameBoard
+                    gameState={gameState}
+                    myPlayerId={myPlayerId}
+                    onPawnClick={handlePawnClick}
+                    selectedPawns={selectedPawns}
+                />
+                </div>
+
+                {/* Player Hand */}
+                {myRole === 'PLAYER' && gameState.players[myPlayerId!] && (
+                <div style={{
+                    background: '#1e293b',
+                    border: '1px solid #334155',
+                    borderRadius: '16px',
+                    padding: '24px'
+                }}>
+                    <h3 style={{
+                    margin: '0 0 16px 0',
+                    fontSize: '18px',
+                    fontWeight: '600',
+                    color: 'white'
+                    }}>
+                    Your Cards
+                    </h3>
+                    <div style={{
+                    display: 'flex',
+                    gap: '12px',
+                    flexWrap: 'wrap',
+                    justifyContent: 'center'
+                    }}>
+                    {gameState.players[myPlayerId!].hand.map(card => (
+                        <Card
+                        key={card.id}
+                        card={card}
+                        onClick={() => handleCardClick(card.id)}
+                        selected={selectedCard === card.id}
+                        disabled={!isMyTurn}
+                        size="large"
+                        />
+                    ))}
+                    </div>
+
+                    {/* Action Buttons */}
+                    {isMyTurn && (
+                    <div style={{
+                        marginTop: '20px',
+                        display: 'flex',
+                        gap: '12px',
+                        justifyContent: 'center'
+                    }}>
+                        <button
+                        onClick={handlePlayCard}
+                        disabled={!selectedCard}
+                        style={{
+                            padding: '14px 32px',
+                            fontSize: '16px',
+                            fontWeight: '600',
+                            color: 'white',
+                            background: selectedCard ? '#10b981' : '#334155',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: selectedCard ? 'pointer' : 'not-allowed',
+                            transition: 'all 0.2s'
+                        }}
+                        >
+                        Play Card
+                        </button>
+                        <button
+                        onClick={handleEndTurn}
+                        style={{
+                            padding: '14px 32px',
+                            fontSize: '16px',
+                            fontWeight: '600',
+                            color: 'white',
+                            background: '#ef4444',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                        }}
+                        >
+                        End Turn
+                        </button>
+                    </div>
+                    )}
+                </div>
+                )}
+            </div>
+
+            {/* Right Sidebar: Players + Chat */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {/* Mini Players List */}
+                <div style={{
+                background: '#1e293b',
+                border: '1px solid #334155',
+                borderRadius: '12px',
+                padding: '16px'
+                }}>
+                <h3 style={{
+                    margin: '0 0 12px 0',
+                    fontSize: '16px',
+                    fontWeight: '600',
+                    color: 'white'
+                }}>
+                    Players
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {gameState.players.map((player, idx) => {
+                    const info = roomInfo?.players.find(p => p.playerId === idx);
+                    const isCurrent = gameState.turnIndex === idx;
+                    return (
+                        <div
+                        key={idx}
+                        style={{
+                            padding: '8px 12px',
+                            background: isCurrent ? '#334155' : '#0f172a',
+                            borderRadius: '8px',
+                            border: isCurrent ? '2px solid #10b981' : 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px'
+                        }}
+                        >
+                        <div style={{
+                            width: '32px',
+                            height: '32px',
+                            borderRadius: '50%',
+                            background: `linear-gradient(135deg, ${getPlayerColor(idx)})`,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '14px',
+                            fontWeight: 'bold',
+                            color: 'white',
+                            flexShrink: 0
+                        }}>
+                            {(info?.name || `P${idx + 1}`).charAt(0).toUpperCase()}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{
+                            fontSize: '14px',
+                            fontWeight: '600',
+                            color: 'white',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                            }}>
+                            {info?.name || `Player ${idx + 1}`}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#64748b' }}>
+                            {player.hand.length} cards
+                            </div>
+                        </div>
+                        </div>
+                    );
+                    })}
+                </div>
+                </div>
+
+                {/* Chat */}
+                <div style={{ flex: 1, minHeight: '400px' }}>
+                <Chat 
+                    messages={chatMessages} 
+                    onSendMessage={handleSendChat}
+                    myClientId={roomInfo?.players.find(p => p.playerId === myPlayerId)?.clientId}
+                />
                 </div>
             </div>
             </div>
@@ -579,14 +825,14 @@ export const RoomView: React.FC = () => {
 
 function getPlayerColor(playerId: number): string {
     const colors = [
-        '#3b82f6, #2563eb', 
-        '#10b981, #059669', 
-        '#f59e0b, #d97706', 
-        '#ef4444, #dc2626', 
-        '#8b5cf6, #7c3aed', 
-        '#ec4899, #db2777', 
-        '#06b6d4, #0891b2', 
-        '#f97316, #ea580c', 
+        '#3b82f6, #2563eb', // blue
+        '#10b981, #059669', // green
+        '#f59e0b, #d97706', // orange
+        '#ef4444, #dc2626', // red
+        '#8b5cf6, #7c3aed', // purple
+        '#ec4899, #db2777', // pink
+        '#06b6d4, #0891b2', // cyan
+        '#f97316, #ea580c', // orange-red
     ];
     return colors[playerId % colors.length];
 }

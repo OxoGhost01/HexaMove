@@ -1,3 +1,4 @@
+// src/api/socket.ts
 import type { ClientMessage, ServerMessage } from '../types/protocol';
 
 type MessageHandler = (message: ServerMessage) => void;
@@ -15,7 +16,8 @@ class SocketManager {
 
         // If already connected, just join the room
         if (this.socket?.readyState === WebSocket.OPEN) {
-        this.joinRoom(roomId);
+        const playerName = localStorage.getItem('playerName') || undefined;
+        this.joinRoom(roomId, playerName);
         return;
         }
 
@@ -30,7 +32,8 @@ class SocketManager {
         this.socket.onopen = () => {
         console.log('WebSocket connected');
         this.isConnecting = false;
-        this.joinRoom(roomId);
+        const playerName = localStorage.getItem('playerName') || undefined;
+        this.joinRoom(roomId, playerName);
         };
 
         this.socket.onmessage = (event) => {
@@ -118,6 +121,10 @@ class SocketManager {
 
     endTurn() {
         this.send({ type: 'END_TURN' });
+    }
+
+    sendChat(message: string) {
+        this.send({ type: 'SEND_CHAT', message });
     }
 }
 

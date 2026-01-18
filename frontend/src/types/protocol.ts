@@ -58,6 +58,7 @@ export type ClientMessage =
     | { type: "BECOME_PLAYER"; playerName?: string }
     | { type: "SET_SETTINGS"; maxPlayers?: number; teamsEnabled?: boolean; private?: boolean }
     | { type: "START_GAME" }
+    | { type: "SEND_CHAT"; message: string }
     | {
         type: "PLAY_CARD";
         cardId: string;
@@ -88,6 +89,7 @@ export interface RoomInfo {
 export type ServerMessage =
     | { type: "ROOM_STATE"; state: GameState | null; room: RoomInfo }
     | { type: "ROLE_ASSIGNED"; role: "PLAYER" | "SPECTATOR"; playerId?: number }
+    | { type: "CHAT_MESSAGE"; clientId: string; playerName?: string; message: string; timestamp: number }
     | { type: "ERROR"; message: string };
 
 export interface LobbyState {

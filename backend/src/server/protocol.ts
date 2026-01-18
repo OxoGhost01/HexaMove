@@ -35,6 +35,7 @@ export interface RoomInfo {
 export type ServerMessage =
     | { type: "ROOM_STATE"; state: GameState | null; room: RoomInfo }
     | { type: "ROLE_ASSIGNED"; role: "PLAYER" | "SPECTATOR"; playerId?: number | undefined }
+    | { type: "CHAT_MESSAGE"; clientId: string; playerName?: string; message: string; timestamp: number }
     | { type: "ERROR"; message: string };
 
 export interface LobbyState {

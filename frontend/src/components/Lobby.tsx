@@ -1,6 +1,8 @@
+// src/components/Lobby.tsx
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { generateRoomId, isValidRoomId } from '../utils/roomsId';
+import { generateRoomId, isValidRoomId } from '../utils/roomId';
+import { generateRandomName } from '../utils/nameGenerator';
 
 export const Lobby: React.FC = () => {
     const navigate = useNavigate();
@@ -15,13 +17,11 @@ export const Lobby: React.FC = () => {
     }, []);
 
     const handleQuickPlay = async () => {
-        if (!playerName.trim()) {
-        alert('Please enter your name first!');
-        return;
-        }
-
         setIsLoading(true);
-        localStorage.setItem('playerName', playerName.trim());
+        
+        // Generate name if empty
+        const finalName = playerName.trim() || generateRandomName();
+        localStorage.setItem('playerName', finalName);
 
         try {
         // Try to find an available public room
@@ -30,52 +30,44 @@ export const Lobby: React.FC = () => {
 
         if (data.rooms && data.rooms.length > 0) {
             // Join the first available room
-            navigate(`/${data.rooms[0].id}`, { state: { playerName: playerName.trim() } });
+            navigate(`/${data.rooms[0].id}`, { state: { playerName: finalName } });
         } else {
             // Create a new public room
             const newRoomId = generateRoomId();
-            navigate(`/${newRoomId}`, { state: { playerName: playerName.trim(), isPublic: true } });
+            navigate(`/${newRoomId}`, { state: { playerName: finalName, isPublic: true } });
         }
         } catch (error) {
         console.error('Failed to fetch rooms:', error);
         // Fallback: create new room
         const newRoomId = generateRoomId();
-        navigate(`/${newRoomId}`, { state: { playerName: playerName.trim(), isPublic: true } });
+        navigate(`/${newRoomId}`, { state: { playerName: finalName, isPublic: true } });
         } finally {
         setIsLoading(false);
         }
     };
 
     const handleCreatePrivate = () => {
-        if (!playerName.trim()) {
-        alert('Please enter your name first!');
-        return;
-        }
-
-        localStorage.setItem('playerName', playerName.trim());
+        const finalName = playerName.trim() || generateRandomName();
+        localStorage.setItem('playerName', finalName);
         const newRoomId = generateRoomId();
-        navigate(`/${newRoomId}`, { state: { playerName: playerName.trim(), isPublic: false } });
+        navigate(`/${newRoomId}`, { state: { playerName: finalName, isPublic: false } });
     };
 
     const handleJoinRoom = () => {
-        if (!playerName.trim()) {
-        alert('Please enter your name first!');
-        return;
-        }
-
         if (!roomCode.trim()) {
         alert('Please enter a room code!');
         return;
         }
 
+        const finalName = playerName.trim() || generateRandomName();
         const code = roomCode.trim().toUpperCase();
         if (!isValidRoomId(code)) {
         alert('Room code must be 4 letters (e.g., ABCD)');
         return;
         }
 
-        localStorage.setItem('playerName', playerName.trim());
-        navigate(`/${code}`, { state: { playerName: playerName.trim() } });
+        localStorage.setItem('playerName', finalName);
+        navigate(`/${code}`, { state: { playerName: finalName } });
     };
 
     return (
@@ -235,27 +227,27 @@ export const Lobby: React.FC = () => {
 
             <button
                 onClick={handleJoinRoom}
-                disabled={!playerName.trim() || !roomCode.trim()}
+                disabled={!roomCode.trim()}
                 style={{
                 width: '100%',
                 padding: '14px',
                 fontSize: '16px',
                 fontWeight: '600',
-                color: playerName.trim() && roomCode.trim() ? 'white' : '#64748b',
-                background: playerName.trim() && roomCode.trim() ? '#334155' : '#1e293b',
+                color: roomCode.trim() ? 'white' : '#64748b',
+                background: roomCode.trim() ? '#334155' : '#1e293b',
                 border: '2px solid #334155',
                 borderRadius: '12px',
-                cursor: playerName.trim() && roomCode.trim() ? 'pointer' : 'not-allowed',
+                cursor: roomCode.trim() ? 'pointer' : 'not-allowed',
                 transition: 'all 0.2s',
                 marginBottom: '16px'
                 }}
                 onMouseEnter={(e) => {
-                if (playerName.trim() && roomCode.trim()) {
+                if (roomCode.trim()) {
                     e.currentTarget.style.background = '#475569';
                 }
                 }}
                 onMouseLeave={(e) => {
-                if (playerName.trim() && roomCode.trim()) {
+                if (roomCode.trim()) {
                     e.currentTarget.style.background = '#334155';
                 }
                 }}
@@ -266,30 +258,25 @@ export const Lobby: React.FC = () => {
             {/* Create Private */}
             <button
                 onClick={handleCreatePrivate}
-                disabled={!playerName.trim()}
                 style={{
                 width: '100%',
                 padding: '14px',
                 fontSize: '16px',
                 fontWeight: '600',
-                color: playerName.trim() ? '#94a3b8' : '#475569',
+                color: '#94a3b8',
                 background: 'transparent',
                 border: '2px solid #334155',
                 borderRadius: '12px',
-                cursor: playerName.trim() ? 'pointer' : 'not-allowed',
+                cursor: 'pointer',
                 transition: 'all 0.2s'
                 }}
                 onMouseEnter={(e) => {
-                if (playerName.trim()) {
-                    e.currentTarget.style.borderColor = '#475569';
-                    e.currentTarget.style.color = 'white';
-                }
+                e.currentTarget.style.borderColor = '#475569';
+                e.currentTarget.style.color = 'white';
                 }}
                 onMouseLeave={(e) => {
                 e.currentTarget.style.borderColor = '#334155';
-                if (playerName.trim()) {
-                    e.currentTarget.style.color = '#94a3b8';
-                }
+                e.currentTarget.style.color = '#94a3b8';
                 }}
             >
                 🔒 Create Private Game
